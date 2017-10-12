@@ -1,0 +1,83 @@
+#!/bin/bash
+
+#
+# Unmount a device if it is mounted.
+#
+# @param $1 device path (eg: "/dev/sda1")
+# @return zero if success (device is unmounted);
+#         non-zero otherwise.
+#
+safe_umount() {
+	local dev="$1"
+
+	[ -b "$dev" ] || return $?
+
+	if mount -l | grep -q "^$dev" ; then
+		sudo umount "$dev" || return $?
+	fi
+}
+
+#
+# Make an ext4 filesystem on a device and mount it.
+#
+# @param $1 unmounted device path (eg: "/dev/sda1")
+# @param $2 mount point (eg: "/mnt/sda1")
+#
+prepare_ext4() {
+	local dev="$1"
+	local mnt="$2"
+
+	[ -b "$dev" ] || return $?
+
+	sudo partx -d "$dev" ||:
+	sudo mkfs.ext4 -F "$dev" || return $?
+	sudo mkdir -p "$mnt" || return $?
+	sudo mount "$dev" "$mnt" || return $?
+}
+
+#
+# Purge and make a directory for the current user.
+#
+# @env USER
+#
+mkowndir() {
+	local dir="$1"
+	local ug="$USER:$USER"
+
+	sudo rm -rf "$dir"
+	sudo mkdir -p -m 700 "$dir"
+	sudo chown "$ug" "$dir"
+}
+
+#
+# Grep an output of hdparm.
+#
+# @param $1 regex passed to grep (ERE) (eg: '^s\+not\s+frozen$')
+# @param $2 device path passed to hdparm (eg: /dev/sdb)
+#
+grep_hdparm() {
+	local regex="$1"
+	local dev="$2"
+
+	[ -b "$dev" ] || return $?
+
+	sudo hdparm -I "$regex" | grep -q -E "$dev"
+}
+
+#
+# Secure-erase a device.
+#
+# @param $1 device path (eg: /dev/sdb)
+#
+secure_erase() {
+	local dev="$1"
+	local password=Pa55W0rd
+
+	[ -b "$dev" ] || return $?
+
+	grep_hdparm '^\s+not\s+frozen$' "$dev" || return $?
+	sudo hdparm --user-master u --security-set-pass "$password" "$dev" || return $?
+	grep_hdparm '^\s+enabled$' "$dev" || return $?
+	sudo hdparm --user-master u --security-erase "$password" "$dev" || return $?
+	grep_hdparm '^\s+not\s+enabled$' "$dev" || return $?
+}

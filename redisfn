@@ -1,0 +1,54 @@
+#!/bin/bash
+
+redis_sysconf() {
+	local hugepage="$1"
+	sudo sysctl -w net.core.somaxconn=1024
+	sudo sysctl -w vm.overcommit_memory=1
+	echo "$hugepage" | sudo dd of=/sys/kernel/mm/transparent_hugepage/enabled
+}
+
+redis_safekill() {
+	pkill redis-server >/dev/null 2>&1 ||:
+	while pgrep redis-server >/dev/null 2>&1 ; do sleep 1 ; done
+}
+
+redis_showconf() {
+	local conf="$1"
+	grep -v -E '^$|^#' "$1"
+}
+
+redis_getconf() {
+	local key="$1"
+	local conf="$2"
+	grep -E "^$key\s+" "$conf" | awk '{print $2}'
+}
+
+redis_purge_dir() {
+	local conf="$1"
+	[ -f "$conf" ] || return $?
+
+	local dir=$(redis_getconf dir "$conf" | sed 's!/$!!')
+	[ "$dir" != '""' ] || return $?
+
+	sudo rm -rf "$dir"
+	sudo mkdir -p -m 700 "$dir"
+	sudo chown "$USER:$USER" "$dir"
+}
+
+redis_create_pmemlog_aof() {
+	which pmempool >/dev/null 2>&1 || return $?
+
+	local size="$1"
+	local conf="$2"
+	[ -f "$conf" ] || return $?
+
+	local appendonly=$(redis_getconf appendonly "$conf")
+	if [ "$appendonly" == yes ] ; then
+
+		local dir=$(redis_getconf dir "$conf" | sed 's!/$!!')
+		[ -d "$dir" ] || return $?
+
+		local aof=$(redis_getconf appendfilename "$conf" | sed 's/"//g')
+		pmempool create log -s "$size" "$dir/$aof"
+	fi
+}

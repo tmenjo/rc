@@ -1,0 +1,35 @@
+#!/bin/sh
+
+#
+# Create pmem memory namespace.
+#
+# -t pmem -m memory -M dev
+#
+# @param $1 namespace (eg: "namespace0.0")
+# @param $2 "dev" or "mem" (optional; default="dev")
+#
+create_pmem_memory_ns() {
+	local ns="$1"
+	local map="${2:-dev}"
+	[ -n "$ns"  ] || return $?
+	[ -n "$map" ] || return $?
+
+	sudo ndctl create-namespace -f -e "$ns" -t pmem -m memory -M "$map"
+}
+
+#
+# Make an ext4 filesystem on a device and mount it with DAX option.
+#
+# @param $1 unmounted device path (eg: "/dev/pmem0")
+# @param $2 mount point (eg: "/mnt/pmem0")
+#
+prepare_ext4_dax() {
+	local dev="$1"
+	local mnt="$2"
+	[ -n "$dev" ] || return $?
+	[ -n "$mnt" ] || return $?
+
+	sudo mkfs.ext4 -F "$dev" || return $?
+	sudo mkdir -p "$mnt" || return $?
+	sudo mount -o dax "$dev" "$mnt" || return $?
+}

@@ -1,0 +1,104 @@
+#!/bin/bash
+
+#
+# Remove PGDATA directory tree and make a new one.
+# @env PGDATA
+# @param $1 user:group passed to chown (optional; default="$USER:$USER")
+#
+pg_purgedata() {
+	local ug="${1:-$USER:$USER}"
+	sudo rm -rf "$PGDATA"
+	sudo mkdir -p -m 700 "$PGDATA"
+	sudo chown "$ug" "$PGDATA"
+}
+
+#
+# Start postgres if it is not running.
+#
+# @env PGDATA
+# @param $@ options passed to pg_ctl
+# @return 0 if success (postgres is started or already up),
+#         non-zero otherwise.
+#
+pg_safestart() {
+	if pgrep postgres ; then return 0 ; fi
+	pg_ctl -D "$PGDATA" "$@" start
+}
+
+#
+# Stop postgres if it is running.
+#
+# @env PGDATA
+# @param $@ options passed to pg_ctl
+# @return 0 if success (postgres is stopped or already down),
+#         non-zero otherwise.
+#
+pg_safestop() {
+	if ! pgrep postgres ; then return 0 ; fi
+	pg_ctl -D "$PGDATA" "$@" stop
+}
+
+#
+# Show postgres config without comment.
+#
+# @param $1 path to config file
+#
+pg_showconf() {
+	local cnf="$1"
+	grep -v -E '^\s*$|^\s*#' "$cnf" | sed -r 's/\s+#.*$//g'
+}
+
+#
+# Query {min,max}_wal_size to postgres.
+#
+# @env PGDATA
+# @param $@ options passed to psql
+#
+pg_show_wal_settings() {
+	sql=$(cat <<-EOF
+		select name, setting, unit from pg_settings
+		where name in ('min_wal_size', 'max_wal_size');
+		EOF
+	)
+	psql -c "$sql" "$@" postgres
+}
+
+#
+# List postgres processes.
+#
+# Output example:
+#
+#   PID  PPID COMMAND
+# 27148     1 /home/menjo/pgsql/bin/postgres -D /mnt/sdb/pgsql
+# 27149 27148 postgres: logger process
+# 27151 27148 postgres: checkpointer process
+# 27152 27148 postgres: writer process
+# 27153 27148 postgres: wal writer process
+# 27154 27148 postgres: autovacuum launcher process
+# 27155 27148 postgres: stats collector process
+# 27156 27148 postgres: bgworker: logical replication launcher
+#
+pg_ps() {
+	ps -C postgres -o pid,ppid,args
+}
+
+#
+# Sleep until there are 8 postgres processes.
+#
+# Note that this will be in infinite loop if no postgres is running.
+#
+pg_stabilize() {
+	while [ $(pgrep postgres | wc -l) -ne 8 ] ; do
+		sleep 1
+	done
+}
+
+#
+# Let each running postgres run on the specified CPUs.
+#
+# @param $1 CPUs in taskset -c format (eg: 0-3,8-11)
+#
+pg_cpus() {
+	local cpus="$1"
+	pgrep postgres | xargs -n 1 -- taskset -c -p "$1"
+}
